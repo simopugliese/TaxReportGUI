@@ -3,22 +3,24 @@ package com.simonepugliese.taxreportgui.controller;
 import com.simonepugliese.taxreportgui.util.ServiceManager;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
+import javafx.fxml.FXMLLoader;
+import javafx.scene.Parent;
 import javafx.scene.control.*;
+import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.stage.FileChooser;
-import javafx.stage.Stage;
 import javafx.util.StringConverter;
 import org.kordamp.ikonli.javafx.FontIcon;
 import pugliesesimone.taxreport.model.*;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.IOException;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 
 public class AddExpenseController {
 
@@ -106,7 +108,7 @@ public class AddExpenseController {
             List<Person> persons = ServiceManager.getInstance().getService().getAllPersons();
             comboPerson.setItems(FXCollections.observableArrayList(persons));
         } catch (Exception e) {
-            // Ignoriamo errori di connessione qui, magari il DB non è ancora configurato
+            // Ignoriamo errori di connessione qui
         }
     }
 
@@ -121,7 +123,6 @@ public class AddExpenseController {
     public void setEditingExpense(Expense expense) {
         this.editingExpense = expense;
 
-        // Seleziona la persona corretta
         if (expense.getPerson() != null) {
             comboPerson.getItems().stream()
                     .filter(p -> p.getId().equals(expense.getPerson().getId()))
@@ -140,7 +141,7 @@ public class AddExpenseController {
             try {
                 datePicker.setValue(LocalDate.parse(expense.getRawDate(), DateTimeFormatter.ofPattern("dd/MM/yyyy")));
             } catch (Exception e) {
-                System.err.println("Formato data non valido, impossibile parsare nel DatePicker: " + expense.getRawDate());
+                System.err.println("Formato data non valido: " + expense.getRawDate());
             }
         }
 
@@ -190,12 +191,11 @@ public class AddExpenseController {
                 }
             }
 
-            // Calcolo documenti SOPRAVVISSUTI (Esistenti non cancellati)
+            // Calcolo documenti SOPRAVVISSUTI
             List<Document> survivingDocs = new ArrayList<>();
             if (editingExpense != null) {
                 for (AttachmentItem item : filesListView.getItems()) {
                     if (item.file == null) {
-                        // Cerchiamo il documento originale che corrisponde a questo nome/tipo
                         editingExpense.getDocuments().stream()
                                 .filter(d -> d.getDocumentType() == item.type && d.getRelativePath().endsWith(item.existingName))
                                 .findFirst()
@@ -218,7 +218,6 @@ public class AddExpenseController {
                         dateStr,
                         editingExpense.getExpenseState()
                 );
-                // Fondamentale: settiamo solo quelli che l'utente ha lasciato in lista
                 expenseToSave.setDocuments(survivingDocs);
             } else {
                 expenseToSave = new Expense(
@@ -230,15 +229,17 @@ public class AddExpenseController {
 
             new Alert(Alert.AlertType.INFORMATION, "Spesa salvata con successo!").showAndWait();
 
-            // Chiudi la finestra (o il tab) dopo il salvataggio per evitare confusioni
-            if (btnSave.getScene().getWindow() instanceof Stage stage) {
-                stage.close();
-            } else {
-                // Se siamo dentro il main view, pulisci tutto
-                editingExpense = null;
-                filesListView.getItems().clear();
-                txtDescription.clear();
-                btnSave.setText("SALVA SPESA");
+            // --- FIX NAVIGAZIONE: Torna alla Dashboard ---
+            try {
+                FXMLLoader loader = new FXMLLoader(getClass().getResource("/com/simonepugliese/taxreportgui/view/DashboardView.fxml"));
+                Parent view = loader.load();
+
+                // Risaliamo al BorderPane principale e settiamo la Dashboard al centro
+                if (btnSave.getScene().getRoot() instanceof BorderPane mainPane) {
+                    mainPane.setCenter(view);
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
             }
 
         } catch (Exception e) {
