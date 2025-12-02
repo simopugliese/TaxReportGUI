@@ -7,6 +7,8 @@ import javafx.scene.control.*;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.stage.FileChooser;
+import javafx.stage.Stage;
+import javafx.util.StringConverter;
 import org.kordamp.ikonli.javafx.FontIcon;
 import pugliesesimone.taxreport.model.*;
 
@@ -16,31 +18,31 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 public class AddExpenseController {
 
-    @FXML private TextField txtPersonName, txtFiscalCode, txtDescription;
+    @FXML private ComboBox<Person> comboPerson;
+    @FXML private TextField txtFiscalCode;
+    @FXML private TextField txtDescription;
     @FXML private ComboBox<String> comboYear;
     @FXML private ComboBox<ExpenseType> comboType;
     @FXML private DatePicker datePicker;
     @FXML private ListView<AttachmentItem> filesListView;
     @FXML private Button btnSave;
 
-    // Se valorizzato, siamo in modalità MODIFICA
     private Expense editingExpense;
 
     private static class AttachmentItem {
-        File file; // Null se è un documento già esistente sul server
+        File file;
         DocumentType type;
-        String existingName; // Usato solo per visualizzazione
+        String existingName;
 
-        // Costruttore per NUOVI file
         public AttachmentItem(File f, DocumentType t) {
             this.file = f;
             this.type = t;
         }
 
-        // Costruttore per file ESISTENTI
         public AttachmentItem(String name, DocumentType t) {
             this.existingName = name;
             this.type = t;
@@ -60,6 +62,16 @@ public class AddExpenseController {
         comboType.setItems(FXCollections.observableArrayList(ExpenseType.values()));
         comboType.getSelectionModel().selectFirst();
 
+        // Setup Combo Persone
+        comboPerson.setConverter(new StringConverter<>() {
+            @Override
+            public String toString(Person p) { return p == null ? "" : p.getName(); }
+            @Override
+            public Person fromString(String string) { return null; }
+        });
+
+        loadPersons();
+
         filesListView.setCellFactory(param -> new ListCell<>() {
             @Override
             protected void updateItem(AttachmentItem item, boolean empty) {
@@ -72,14 +84,12 @@ public class AddExpenseController {
                     Label lblName = new Label(labelText);
                     Label lblType = new Label("[" + item.type + "]");
 
-                    // Stile diverso per file esistenti
                     if (item.file == null) {
                         lblName.setStyle("-fx-text-fill: blue;");
                     }
 
                     Button btnDel = new Button("", new FontIcon("fas-trash"));
                     btnDel.getStyleClass().add("danger");
-
                     btnDel.setOnAction(e -> getListView().getItems().remove(item));
 
                     HBox.setHgrow(lblName, Priority.ALWAYS);
@@ -90,12 +100,38 @@ public class AddExpenseController {
         });
     }
 
+    private void loadPersons() {
+        try {
+            if (!ServiceManager.getInstance().isReady()) ServiceManager.getInstance().init();
+            List<Person> persons = ServiceManager.getInstance().getService().getAllPersons();
+            comboPerson.setItems(FXCollections.observableArrayList(persons));
+        } catch (Exception e) {
+            // Ignoriamo errori di connessione qui, magari il DB non è ancora configurato
+        }
+    }
+
+    @FXML
+    public void handlePersonSelection() {
+        Person p = comboPerson.getValue();
+        if (p != null) {
+            txtFiscalCode.setText(p.getFiscalCode());
+        }
+    }
+
     public void setEditingExpense(Expense expense) {
         this.editingExpense = expense;
 
-        // Popola i campi
-        txtPersonName.setText(expense.getPerson().getName());
-        txtFiscalCode.setText(expense.getPerson().getFiscalCode());
+        // Seleziona la persona corretta
+        if (expense.getPerson() != null) {
+            comboPerson.getItems().stream()
+                    .filter(p -> p.getId().equals(expense.getPerson().getId()))
+                    .findFirst()
+                    .ifPresent(p -> {
+                        comboPerson.setValue(p);
+                        txtFiscalCode.setText(p.getFiscalCode());
+                    });
+        }
+
         txtDescription.setText(expense.getDescription());
         comboYear.setValue(expense.getYear());
         comboType.setValue(expense.getExpenseType());
@@ -103,10 +139,11 @@ public class AddExpenseController {
         if (expense.getRawDate() != null && !expense.getRawDate().isEmpty()) {
             try {
                 datePicker.setValue(LocalDate.parse(expense.getRawDate(), DateTimeFormatter.ofPattern("dd/MM/yyyy")));
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                System.err.println("Formato data non valido, impossibile parsare nel DatePicker: " + expense.getRawDate());
+            }
         }
 
-        // Carica documenti esistenti nella lista (solo visualizzazione)
         for (Document doc : expense.getDocuments()) {
             String name = new File(doc.getRelativePath()).getName();
             filesListView.getItems().add(new AttachmentItem(name, doc.getDocumentType()));
@@ -138,25 +175,32 @@ public class AddExpenseController {
         try {
             if (!ServiceManager.getInstance().isReady()) ServiceManager.getInstance().init();
 
-            if (txtPersonName.getText().isEmpty()) {
-                new Alert(Alert.AlertType.WARNING, "Dati incompleti!").show();
+            if (comboPerson.getValue() == null) {
+                new Alert(Alert.AlertType.WARNING, "Seleziona una persona!").show();
                 return;
             }
 
-            // 1. Gestione Persona: Se siamo in edit, proviamo a riusare l'ID persona esistente
-            Person person;
-            if (editingExpense != null && editingExpense.getPerson().getFiscalCode().equals(txtFiscalCode.getText())) {
-                person = new Person(editingExpense.getPerson().getId(), txtPersonName.getText(), txtFiscalCode.getText());
-            } else {
-                person = new Person(txtPersonName.getText(), txtFiscalCode.getText());
-            }
-            ServiceManager.getInstance().getService().registerPerson(person);
+            Person person = comboPerson.getValue();
 
-            // 2. Preparazione Allegati (SOLO quelli nuovi, che hanno File != null)
+            // Preparazione Allegati NUOVI
             List<Attachment> newAttachments = new ArrayList<>();
             for (AttachmentItem item : filesListView.getItems()) {
                 if (item.file != null) {
                     newAttachments.add(new Attachment(item.type, item.file.getName(), new FileInputStream(item.file)));
+                }
+            }
+
+            // Calcolo documenti SOPRAVVISSUTI (Esistenti non cancellati)
+            List<Document> survivingDocs = new ArrayList<>();
+            if (editingExpense != null) {
+                for (AttachmentItem item : filesListView.getItems()) {
+                    if (item.file == null) {
+                        // Cerchiamo il documento originale che corrisponde a questo nome/tipo
+                        editingExpense.getDocuments().stream()
+                                .filter(d -> d.getDocumentType() == item.type && d.getRelativePath().endsWith(item.existingName))
+                                .findFirst()
+                                .ifPresent(survivingDocs::add);
+                    }
                 }
             }
 
@@ -165,9 +209,8 @@ public class AddExpenseController {
 
             Expense expenseToSave;
             if (editingExpense != null) {
-                // *** EDIT MODE *** : Usiamo il costruttore completo con ID esistente
                 expenseToSave = new Expense(
-                        editingExpense.getId(), // ID ORIGINALE!
+                        editingExpense.getId(),
                         comboYear.getValue(),
                         person,
                         comboType.getValue(),
@@ -175,22 +218,28 @@ public class AddExpenseController {
                         dateStr,
                         editingExpense.getExpenseState()
                 );
+                // Fondamentale: settiamo solo quelli che l'utente ha lasciato in lista
+                expenseToSave.setDocuments(survivingDocs);
             } else {
-                // *** NEW MODE ***
                 expenseToSave = new Expense(
                         comboYear.getValue(), person, comboType.getValue(), txtDescription.getText(), dateStr
                 );
             }
 
-            // Il backend farà il MERGE dei documenti nuovi con quelli vecchi
             ServiceManager.getInstance().getService().registerExpense(expenseToSave, newAttachments);
 
-            new Alert(Alert.AlertType.INFORMATION, "Spesa salvata con successo!").show();
+            new Alert(Alert.AlertType.INFORMATION, "Spesa salvata con successo!").showAndWait();
 
-            editingExpense = null;
-            filesListView.getItems().clear();
-            txtDescription.clear();
-            btnSave.setText("SALVA SPESA");
+            // Chiudi la finestra (o il tab) dopo il salvataggio per evitare confusioni
+            if (btnSave.getScene().getWindow() instanceof Stage stage) {
+                stage.close();
+            } else {
+                // Se siamo dentro il main view, pulisci tutto
+                editingExpense = null;
+                filesListView.getItems().clear();
+                txtDescription.clear();
+                btnSave.setText("SALVA SPESA");
+            }
 
         } catch (Exception e) {
             new Alert(Alert.AlertType.ERROR, "Errore: " + e.getMessage()).show();

@@ -8,6 +8,7 @@
 <?import javafx.scene.control.TextField?>
 <?import javafx.scene.layout.ColumnConstraints?>
 <?import javafx.scene.layout.GridPane?>
+<?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.RowConstraints?>
 <?import javafx.scene.layout.VBox?>
 <?import org.kordamp.ikonli.javafx.FontIcon?>
@@ -26,6 +27,8 @@
                 <ColumnConstraints hgrow="ALWAYS" minWidth="10.0" prefWidth="100.0" />
             </columnConstraints>
             <rowConstraints>
+                <RowConstraints minHeight="10.0" vgrow="SOMETIMES" />
+                <RowConstraints minHeight="10.0" vgrow="SOMETIMES" />
                 <RowConstraints minHeight="10.0" vgrow="SOMETIMES" />
                 <RowConstraints minHeight="10.0" vgrow="SOMETIMES" />
                 <RowConstraints minHeight="10.0" vgrow="SOMETIMES" />
@@ -67,5 +70,17 @@
                 <FontIcon iconLiteral="fas-save" />
             </graphic>
         </Button>
+
+        <Separator prefWidth="200.0" />
+        <Label styleClass="title-4" text="Gestione Persone" />
+        <HBox spacing="10">
+            <TextField fx:id="txtNewName" promptText="Nome Cognome" HBox.hgrow="SOMETIMES"/>
+            <TextField fx:id="txtNewCF" promptText="Codice Fiscale" HBox.hgrow="SOMETIMES"/>
+            <Button text="Aggiungi" onAction="#handleAddPerson" styleClass="success">
+                <graphic>
+                    <FontIcon iconLiteral="fas-plus" />
+                </graphic>
+            </Button>
+        </HBox>
     </children>
 </VBox>

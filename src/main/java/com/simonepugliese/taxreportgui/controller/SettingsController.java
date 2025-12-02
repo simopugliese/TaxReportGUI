@@ -6,11 +6,15 @@ import javafx.fxml.FXML;
 import javafx.scene.control.Alert;
 import javafx.scene.control.PasswordField;
 import javafx.scene.control.TextField;
+import pugliesesimone.taxreport.model.Person;
 
 public class SettingsController {
 
     @FXML private TextField txtHost, txtDbPort, txtDbName, txtDbUser, txtSmbShare, txtSmbUser;
     @FXML private PasswordField txtDbPass, txtSmbPass;
+
+    // Nuovi campi per aggiunta persona
+    @FXML private TextField txtNewName, txtNewCF;
 
     @FXML
     public void initialize() {
@@ -40,11 +44,35 @@ public class SettingsController {
         cfg.save();
 
         try {
-            // Tentiamo di inizializzare subito per verificare la connessione
             ServiceManager.getInstance().init();
             new Alert(Alert.AlertType.INFORMATION, "Configurazione salvata e connessione OK!").show();
         } catch (Exception e) {
             new Alert(Alert.AlertType.ERROR, "Config salvata ma connessione fallita: " + e.getMessage()).show();
+        }
+    }
+
+    @FXML
+    public void handleAddPerson() {
+        try {
+            if (!ServiceManager.getInstance().isReady()) ServiceManager.getInstance().init();
+
+            String name = txtNewName.getText();
+            String cf = txtNewCF.getText();
+
+            if (name == null || name.isBlank() || cf == null || cf.isBlank()) {
+                new Alert(Alert.AlertType.WARNING, "Inserisci Nome e CF").show();
+                return;
+            }
+
+            Person p = new Person(name, cf);
+            ServiceManager.getInstance().getService().registerPerson(p);
+
+            new Alert(Alert.AlertType.INFORMATION, "Persona aggiunta con successo!").show();
+            txtNewName.clear();
+            txtNewCF.clear();
+
+        } catch (Exception e) {
+            new Alert(Alert.AlertType.ERROR, "Errore: " + e.getMessage()).show();
         }
     }
 }
