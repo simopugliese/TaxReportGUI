@@ -20,6 +20,13 @@
             <children>
                 <Label styleClass="title-2" text="Panoramica Spese" />
                 <ComboBox fx:id="yearCombo" onAction="#loadData" prefWidth="100.0" />
+
+                <Button mnemonicParsing="false" onAction="#handleEdit" text="Modifica Selezionata">
+                    <graphic>
+                        <FontIcon iconLiteral="fas-edit" />
+                    </graphic>
+                </Button>
+
                 <Button mnemonicParsing="false" onAction="#handleRefresh" styleClass="accent" text="Aggiorna &amp; Valida">
                     <graphic>
                         <FontIcon iconLiteral="fas-sync" />

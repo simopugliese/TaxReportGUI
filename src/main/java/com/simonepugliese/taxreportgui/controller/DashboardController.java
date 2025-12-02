@@ -5,13 +5,16 @@ import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.fxml.FXML;
+import javafx.fxml.FXMLLoader;
+import javafx.scene.Parent;
 import javafx.scene.chart.PieChart;
 import javafx.scene.control.*;
+import javafx.scene.layout.BorderPane;
 import pugliesesimone.taxreport.model.Expense;
 import pugliesesimone.taxreport.model.ExpenseState;
 
+import java.io.IOException;
 import java.util.List;
-import java.util.stream.Collectors;
 
 public class DashboardController {
 
@@ -37,7 +40,6 @@ public class DashboardController {
         colPerson.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getPerson().getName()));
         colState.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getExpenseState().name()));
 
-        // Coloriamo le righe in base allo stato
         colState.setCellFactory(column -> new TableCell<>() {
             @Override
             protected void updateItem(String item, boolean empty) {
@@ -57,21 +59,43 @@ public class DashboardController {
     }
 
     @FXML
+    public void handleEdit() {
+        Expense selected = expenseTable.getSelectionModel().getSelectedItem();
+        if (selected == null) {
+            new Alert(Alert.AlertType.WARNING, "Seleziona una spesa dalla tabella!").show();
+            return;
+        }
+
+        try {
+            FXMLLoader loader = new FXMLLoader(getClass().getResource("/com/simonepugliese/taxreportgui/view/AddExpenseView.fxml"));
+            Parent view = loader.load();
+
+            // Passiamo la spesa al controller
+            AddExpenseController controller = loader.getController();
+            controller.setEditingExpense(selected);
+
+            // Hack veloce: risaliamo al BorderPane principale per cambiare vista
+            // In un'app più grande useresti un EventBus o un NavigationService
+            BorderPane mainPane = (BorderPane) expenseTable.getScene().getRoot();
+            mainPane.setCenter(view);
+
+        } catch (IOException e) {
+            e.printStackTrace();
+            new Alert(Alert.AlertType.ERROR, "Errore apertura vista modifica: " + e.getMessage()).show();
+        }
+    }
+
+    @FXML
     public void loadData() {
         try {
             if (!ServiceManager.getInstance().isReady()) {
                 ServiceManager.getInstance().init();
             }
-
             String year = yearCombo.getValue();
-            // QUI usiamo il trucco del Metadata per avere la lista oggetti
             List<Expense> expenses = ServiceManager.getInstance().getMetadata().findByYear(year);
-
             updateCharts(expenses);
             expenseTable.setItems(FXCollections.observableArrayList(expenses));
-
         } catch (Exception e) {
-            // Se fallisce (es. config mancante), non crashare ma mostra alert o logga
             System.err.println("Impossibile caricare dati dashboard: " + e.getMessage());
         }
     }
@@ -80,11 +104,7 @@ public class DashboardController {
     public void handleRefresh() {
         try {
             if (!ServiceManager.getInstance().isReady()) return;
-
-            // Esegue la logica di backend "CheckCompliance" che aggiorna gli stati su DB
             ServiceManager.getInstance().getService().runComplianceCheck(yearCombo.getValue());
-
-            // Ricarica la UI
             loadData();
             new Alert(Alert.AlertType.INFORMATION, "Verifica completata!").show();
         } catch (Exception e) {
@@ -101,7 +121,6 @@ public class DashboardController {
                 new PieChart.Data("Incomplete", partial)
         );
         statusChart.setData(pieData);
-
         lblTotal.setText("Totale Spese: " + expenses.size());
         lblCompliant.setText("Completate: " + completed);
         lblPartial.setText("Da completare: " + partial);
