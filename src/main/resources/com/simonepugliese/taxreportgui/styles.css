@@ -1,0 +1,12 @@
+.sidebar {
+    -fx-background-color: -color-bg-subtle;
+    -fx-border-color: -color-border-muted;
+    -fx-border-width: 0 1 0 0;
+}
+.sidebar .button {
+    -fx-background-color: transparent;
+    -fx-alignment: CENTER_LEFT;
+}
+.sidebar .button:hover {
+    -fx-background-color: rgba(0, 0, 0, 0.05);
+}

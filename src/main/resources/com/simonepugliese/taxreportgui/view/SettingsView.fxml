@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.PasswordField?>
+<?import javafx.scene.control.Separator?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.layout.ColumnConstraints?>
+<?import javafx.scene.layout.GridPane?>
+<?import javafx.scene.layout.RowConstraints?>
+<?import javafx.scene.layout.VBox?>
+<?import org.kordamp.ikonli.javafx.FontIcon?>
+
+<VBox spacing="20.0" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1" fx:controller="com.simonepugliese.taxreportgui.controller.SettingsController">
+    <padding>
+        <Insets bottom="30.0" left="30.0" right="30.0" top="30.0" />
+    </padding>
+    <children>
+        <Label styleClass="title-2" text="Configurazione Sistema" />
+        <Label text="Inserisci i parametri di connessione al Raspberry Pi o Server locale." textFill="#666666" />
+        <Separator prefWidth="200.0" />
+        <GridPane hgap="15.0" vgap="15.0">
+            <columnConstraints>
+                <ColumnConstraints hgrow="SOMETIMES" maxWidth="200.0" minWidth="10.0" prefWidth="150.0" />
+                <ColumnConstraints hgrow="ALWAYS" minWidth="10.0" prefWidth="100.0" />
+            </columnConstraints>
+            <rowConstraints>
+                <RowConstraints minHeight="10.0" vgrow="SOMETIMES" />
+                <RowConstraints minHeight="10.0" vgrow="SOMETIMES" />
+                <RowConstraints minHeight="10.0" vgrow="SOMETIMES" />
+                <RowConstraints minHeight="10.0" vgrow="SOMETIMES" />
+                <RowConstraints minHeight="10.0" vgrow="SOMETIMES" />
+                <RowConstraints minHeight="10.0" vgrow="SOMETIMES" />
+                <RowConstraints minHeight="10.0" vgrow="SOMETIMES" />
+                <RowConstraints minHeight="10.0" vgrow="SOMETIMES" />
+            </rowConstraints>
+            <children>
+                <Label styleClass="title-4" text="Database (MariaDB)" GridPane.columnSpan="2" />
+                <Label text="Host IP:" GridPane.rowIndex="1" />
+                <TextField fx:id="txtHost" GridPane.columnIndex="1" GridPane.rowIndex="1" />
+                <Label text="Porta:" GridPane.rowIndex="2" />
+                <TextField fx:id="txtDbPort" text="3306" GridPane.columnIndex="1" GridPane.rowIndex="2" />
+                <Label text="Nome DB:" GridPane.rowIndex="3" />
+                <TextField fx:id="txtDbName" text="taxreport" GridPane.columnIndex="1" GridPane.rowIndex="3" />
+                <Label text="Utente DB:" GridPane.rowIndex="4" />
+                <TextField fx:id="txtDbUser" GridPane.columnIndex="1" GridPane.rowIndex="4" />
+                <Label text="Password DB:" GridPane.rowIndex="5" />
+                <PasswordField fx:id="txtDbPass" GridPane.columnIndex="1" GridPane.rowIndex="5" />
+
+                <Label styleClass="title-4" text="Storage (SMB/Samba)" GridPane.columnSpan="2" GridPane.rowIndex="6">
+                    <GridPane.margin>
+                        <Insets top="10.0" />
+                    </GridPane.margin>
+                </Label>
+                <Label text="Share Name:" GridPane.rowIndex="7" />
+                <TextField fx:id="txtSmbShare" text="TaxData" GridPane.columnIndex="1" GridPane.rowIndex="7" />
+                <Label text="Utente SMB:" GridPane.rowIndex="8" />
+                <TextField fx:id="txtSmbUser" GridPane.columnIndex="1" GridPane.rowIndex="8" />
+                <Label text="Password SMB:" GridPane.rowIndex="9" />
+                <PasswordField fx:id="txtSmbPass" GridPane.columnIndex="1" GridPane.rowIndex="9" />
+            </children>
+        </GridPane>
+        <Separator prefWidth="200.0" />
+        <Button mnemonicParsing="false" onAction="#handleSave" styleClass="accent" text="Salva Configurazione">
+            <graphic>
+                <FontIcon iconLiteral="fas-save" />
+            </graphic>
+        </Button>
+    </children>
+</VBox>
