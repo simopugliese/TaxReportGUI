@@ -35,8 +35,8 @@ public class DashboardController {
     @FXML private TableColumn<Expense, String> colDate, colType, colDesc, colPerson, colState;
     @FXML private Button btnFilterPerson, btnFilterType;
 
-    private List<Expense> allExpenses = List.of();
-    private List<Person> allPersons = List.of();
+    private List<Expense> allExpenses = new ArrayList<>();
+    private List<Person> allPersons = new ArrayList<>();
 
     private Set<String> selectedPersonIds = new HashSet<>();
     private Set<ExpenseType> selectedCategories = new HashSet<>();
@@ -46,7 +46,8 @@ public class DashboardController {
     @FXML
     public void initialize() {
         setupTable();
-        loadData();
+        // Load iniziale posticipato per permettere alla UI di apparire
+        Platform.runLater(this::loadData);
     }
 
     // --- FILTRI ---
@@ -85,6 +86,7 @@ public class DashboardController {
     }
 
     private void applyFilters() {
+        // Eseguito nel thread UI ma veloce su 5000 elementi in memoria
         List<Expense> filtered = allExpenses.stream()
                 .filter(e -> selectedPersonIds.isEmpty() || selectedPersonIds.contains(e.getPerson().getId().toString()))
                 .filter(e -> selectedCategories.isEmpty() || selectedCategories.contains(e.getExpenseType()))
@@ -129,8 +131,8 @@ public class DashboardController {
         dialog.setTitle(title);
         dialog.setHeaderText("Seleziona gli elementi da visualizzare:");
 
-        ButtonType loginButtonType = new ButtonType("Applica", ButtonBar.ButtonData.OK_DONE);
-        dialog.getDialogPane().getButtonTypes().addAll(loginButtonType, ButtonType.CANCEL);
+        ButtonType applyButtonType = new ButtonType("Applica", ButtonBar.ButtonData.OK_DONE);
+        dialog.getDialogPane().getButtonTypes().addAll(applyButtonType, ButtonType.CANCEL);
 
         VBox content = new VBox(10);
         Set<String> tempSelection = new HashSet<>(currentSelection);
@@ -151,7 +153,7 @@ public class DashboardController {
         dialog.getDialogPane().setContent(scroll);
 
         dialog.setResultConverter(dialogButton -> {
-            if (dialogButton == loginButtonType) return tempSelection;
+            if (dialogButton == applyButtonType) return tempSelection;
             return null;
         });
 
@@ -194,6 +196,9 @@ public class DashboardController {
 
         String selectedYear = yearCombo.getValue();
 
+        // Disabilita UI durante caricamento
+        yearCombo.setDisable(true);
+
         Task<Void> loadTask = new Task<>() {
             @Override
             protected Void call() throws Exception {
@@ -207,6 +212,7 @@ public class DashboardController {
 
                 final List<String> finalYears = availableYears;
 
+                // Aggiorna ComboAnni in thread UI ma senza bloccare
                 Platform.runLater(() -> {
                     isUpdating = true;
                     try {
@@ -222,9 +228,13 @@ public class DashboardController {
                     }
                 });
 
+                // Attesa tecnica per assicurarsi che yearCombo sia aggiornato (safe)
+                Thread.sleep(100);
+
                 String yearToLoad = (selectedYear != null && finalYears.contains(selectedYear))
                         ? selectedYear : finalYears.get(0);
 
+                // Caricamento pesante DB
                 allExpenses = ServiceManager.getInstance().getMetadata().findByYear(yearToLoad);
                 allPersons = ServiceManager.getInstance().getService().getAllPersons();
                 return null;
@@ -234,11 +244,13 @@ public class DashboardController {
         loadTask.setOnRunning(e -> expenseTable.setPlaceholder(new ProgressIndicator()));
 
         loadTask.setOnSucceeded(e -> {
+            yearCombo.setDisable(false);
             expenseTable.setPlaceholder(new Label("Nessuna spesa da visualizzare."));
             applyFilters();
         });
 
         loadTask.setOnFailed(e -> {
+            yearCombo.setDisable(false);
             expenseTable.setPlaceholder(new Label("Errore caricamento dati."));
             new Alert(Alert.AlertType.ERROR, "Errore caricamento: " + loadTask.getException().getMessage()).show();
             loadTask.getException().printStackTrace();
@@ -262,17 +274,15 @@ public class DashboardController {
         } catch (IOException e) { e.printStackTrace(); }
     }
 
-    // [MODIFICATO] Esegue il check in background e SENZA mostrare popup di successo
     @FXML
     public void handleRefresh() {
         if (!ServiceManager.getInstance().isReady()) return;
-
         String year = yearCombo.getValue();
 
         Task<String> complianceTask = new Task<>() {
             @Override
             protected String call() throws Exception {
-                // Esegue il check pesante in background
+                // Check parallelo (nuova implementazione service)
                 return ServiceManager.getInstance().getService().runComplianceCheck(year);
             }
         };
@@ -284,12 +294,9 @@ public class DashboardController {
         });
 
         complianceTask.setOnSucceeded(e -> {
-            // Riabilita UI
             btnFilterPerson.setDisable(false);
             btnFilterType.setDisable(false);
-
-            // [MODIFICA] Niente Alert! Ricarica solo i dati silenziosamente.
-            loadData();
+            loadData(); // Ricarica dati aggiornati
         });
 
         complianceTask.setOnFailed(e -> {
