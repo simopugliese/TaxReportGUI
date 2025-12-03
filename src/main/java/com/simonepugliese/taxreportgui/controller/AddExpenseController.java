@@ -16,7 +16,7 @@ import javafx.stage.FileChooser;
 import javafx.util.StringConverter;
 import org.kordamp.ikonli.javafx.FontIcon;
 import pugliesesimone.taxreport.model.*;
-import javafx.geometry.Pos; // Importato per allineare l'HBox
+import javafx.geometry.Pos;
 
 import java.awt.Desktop;
 import java.io.File;
@@ -46,7 +46,7 @@ public class AddExpenseController {
         DocumentType type;
         String name;
 
-        // [NEW] Stato di downloading (per il feedback visivo)
+        // Stato di downloading (per il feedback visivo)
         private boolean downloading = false;
 
         public AttachmentItem(File f, DocumentType t) {
@@ -101,14 +101,14 @@ public class AddExpenseController {
                 } else {
                     HBox box = new HBox(10);
 
-                    // [NEW] Indicatore di stato
+                    // Indicatore di stato
                     if (item.isDownloading()) {
                         ProgressIndicator pi = new ProgressIndicator(ProgressIndicator.INDETERMINATE_PROGRESS);
                         pi.setPrefSize(20, 20); // Dimensione più gestibile
                         box.getChildren().add(pi);
                     } else {
-                        // Icona "occhi" per indicare visualizzazione
-                        box.getChildren().add(new FontIcon("fas-eye"));
+                        // [MODIFICA] Icona documento generica invece dell'occhio
+                        box.getChildren().add(new FontIcon("fas-file-alt"));
                     }
 
                     String prefix = (item.localFile != null) ? "🆕 " : "☁️ ";
@@ -121,12 +121,9 @@ public class AddExpenseController {
                     btnDel.getStyleClass().add("danger");
                     btnDel.setOnAction(e -> getListView().getItems().remove(item));
 
-                    Button btnView = new Button("", new FontIcon("fas-eye"));
-                    btnView.setDisable(item.isDownloading());
-                    btnView.setOnAction(e -> openAttachment(item));
+                    // Nota: btnView rimosso come da tua versione precedente, visto che usi il doppio click
 
                     HBox.setHgrow(lblName, Priority.ALWAYS);
-                    // Rimuoviamo l'icona "eye" duplicata
                     box.getChildren().addAll(lblName, lblType, btnDel);
 
                     box.setAlignment(Pos.CENTER_LEFT);
@@ -151,7 +148,7 @@ public class AddExpenseController {
 
         if (item.isDownloading()) return;
 
-        // [CORE FIX] Task per il download in background
+        // Task per il download in background
         Task<File> downloadTask = new Task<>() {
             @Override
             protected File call() throws Exception {
