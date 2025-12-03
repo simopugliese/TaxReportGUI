@@ -1,6 +1,7 @@
 package com.simonepugliese.taxreportgui.controller;
 
 import com.simonepugliese.taxreportgui.util.ServiceManager;
+import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
@@ -18,6 +19,8 @@ import pugliesesimone.taxreport.model.ExpenseType;
 import pugliesesimone.taxreport.model.Person;
 
 import java.io.IOException;
+import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -38,13 +41,10 @@ public class DashboardController {
     private Set<String> selectedPersonIds = new HashSet<>();
     private Set<ExpenseType> selectedCategories = new HashSet<>();
 
-    // [NEW] Indicatore di loading globale (potrebbe essere in FXML, ma qui è gestito implicitamente)
+    private boolean isUpdating = false;
 
     @FXML
     public void initialize() {
-        yearCombo.setItems(FXCollections.observableArrayList("2023", "2024", "2025"));
-        yearCombo.setValue("2025");
-
         setupTable();
         loadData();
     }
@@ -158,7 +158,6 @@ public class DashboardController {
         dialog.showAndWait().ifPresent(onConfirm);
     }
 
-    // --- SETUP & LOAD (con Task) ---
     private void setupTable() {
         colDate.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getRawDate()));
         colType.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getExpenseType().name()));
@@ -191,37 +190,60 @@ public class DashboardController {
 
     @FXML
     public void loadData() {
-        String year = yearCombo.getValue();
+        if (isUpdating) return;
 
-        // [CORE FIX] Esegui il caricamento dati su un Task in background
+        String selectedYear = yearCombo.getValue();
+
         Task<Void> loadTask = new Task<>() {
             @Override
             protected Void call() throws Exception {
                 if (!ServiceManager.getInstance().isReady()) ServiceManager.getInstance().init();
-                allExpenses = ServiceManager.getInstance().getMetadata().findByYear(year);
+
+                List<String> availableYears = ServiceManager.getInstance().getMetadata().getAvailableYears();
+
+                if (availableYears.isEmpty()) {
+                    availableYears.add(String.valueOf(LocalDate.now().getYear()));
+                }
+
+                final List<String> finalYears = availableYears;
+
+                Platform.runLater(() -> {
+                    isUpdating = true;
+                    try {
+                        String current = yearCombo.getValue();
+                        yearCombo.setItems(FXCollections.observableArrayList(finalYears));
+                        if (current == null || !finalYears.contains(current)) {
+                            yearCombo.getSelectionModel().selectFirst();
+                        } else {
+                            yearCombo.setValue(current);
+                        }
+                    } finally {
+                        isUpdating = false;
+                    }
+                });
+
+                String yearToLoad = (selectedYear != null && finalYears.contains(selectedYear))
+                        ? selectedYear : finalYears.get(0);
+
+                allExpenses = ServiceManager.getInstance().getMetadata().findByYear(yearToLoad);
                 allPersons = ServiceManager.getInstance().getService().getAllPersons();
                 return null;
             }
         };
 
-        loadTask.setOnRunning(e -> {
-            // Qui puoi mostrare un ProgressIndicator nella UI se vuoi
-            expenseTable.setPlaceholder(new ProgressIndicator());
-        });
+        loadTask.setOnRunning(e -> expenseTable.setPlaceholder(new ProgressIndicator()));
 
         loadTask.setOnSucceeded(e -> {
             expenseTable.setPlaceholder(new Label("Nessuna spesa da visualizzare."));
-            // Aggiorna la UI sul thread JavaFX
             applyFilters();
         });
 
         loadTask.setOnFailed(e -> {
             expenseTable.setPlaceholder(new Label("Errore caricamento dati."));
-            new Alert(Alert.AlertType.ERROR, "Errore caricamento dati: " + loadTask.getException().getMessage()).show();
+            new Alert(Alert.AlertType.ERROR, "Errore caricamento: " + loadTask.getException().getMessage()).show();
             loadTask.getException().printStackTrace();
         });
 
-        // Avvia il Task
         new Thread(loadTask).start();
     }
 
@@ -240,15 +262,43 @@ public class DashboardController {
         } catch (IOException e) { e.printStackTrace(); }
     }
 
+    // [MODIFICATO] Esegue il check in background e SENZA mostrare popup di successo
     @FXML
     public void handleRefresh() {
-        try {
-            if (!ServiceManager.getInstance().isReady()) return;
-            ServiceManager.getInstance().getService().runComplianceCheck(yearCombo.getValue());
+        if (!ServiceManager.getInstance().isReady()) return;
+
+        String year = yearCombo.getValue();
+
+        Task<String> complianceTask = new Task<>() {
+            @Override
+            protected String call() throws Exception {
+                // Esegue il check pesante in background
+                return ServiceManager.getInstance().getService().runComplianceCheck(year);
+            }
+        };
+
+        complianceTask.setOnRunning(e -> {
+            lblTotal.setText("Verifica in corso...");
+            btnFilterPerson.setDisable(true);
+            btnFilterType.setDisable(true);
+        });
+
+        complianceTask.setOnSucceeded(e -> {
+            // Riabilita UI
+            btnFilterPerson.setDisable(false);
+            btnFilterType.setDisable(false);
+
+            // [MODIFICA] Niente Alert! Ricarica solo i dati silenziosamente.
             loadData();
-            new Alert(Alert.AlertType.INFORMATION, "Verifica completata!").show();
-        } catch (Exception e) {
-            new Alert(Alert.AlertType.ERROR, "Errore verifica: " + e.getMessage()).show();
-        }
+        });
+
+        complianceTask.setOnFailed(e -> {
+            btnFilterPerson.setDisable(false);
+            btnFilterType.setDisable(false);
+            new Alert(Alert.AlertType.ERROR, "Errore verifica: " + complianceTask.getException().getMessage()).show();
+            complianceTask.getException().printStackTrace();
+        });
+
+        new Thread(complianceTask).start();
     }
 }
