@@ -5,6 +5,8 @@ import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
+import javafx.collections.transformation.FilteredList;
+import javafx.collections.transformation.SortedList;
 import javafx.concurrent.Task;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
@@ -35,9 +37,12 @@ public class DashboardController {
     @FXML private TableColumn<Expense, String> colDate, colType, colDesc, colPerson, colState;
     @FXML private Button btnFilterPerson, btnFilterType;
 
-    private List<Expense> allExpenses = new ArrayList<>();
-    private List<Person> allPersons = new ArrayList<>();
+    // DATA MODEL REATTIVO (Best Practice JavaFX)
+    private final ObservableList<Expense> masterData = FXCollections.observableArrayList();
+    private FilteredList<Expense> filteredData;
 
+    // Dati di supporto
+    private List<Person> allPersons = new ArrayList<>();
     private Set<String> selectedPersonIds = new HashSet<>();
     private Set<ExpenseType> selectedCategories = new HashSet<>();
 
@@ -86,14 +91,16 @@ public class DashboardController {
     }
 
     private void applyFilters() {
-        // Eseguito nel thread UI ma veloce su 5000 elementi in memoria
-        List<Expense> filtered = allExpenses.stream()
-                .filter(e -> selectedPersonIds.isEmpty() || selectedPersonIds.contains(e.getPerson().getId().toString()))
-                .filter(e -> selectedCategories.isEmpty() || selectedCategories.contains(e.getExpenseType()))
-                .collect(Collectors.toList());
+        // Logica Pura: Aggiorniamo il predicato della FilteredList.
+        // La TableView si aggiornerà istantaneamente da sola.
+        filteredData.setPredicate(expense -> {
+            boolean personMatch = selectedPersonIds.isEmpty() || selectedPersonIds.contains(expense.getPerson().getId().toString());
+            boolean typeMatch = selectedCategories.isEmpty() || selectedCategories.contains(expense.getExpenseType());
+            return personMatch && typeMatch;
+        });
 
-        updateUi(filtered);
         updateButtonsState();
+        updateUiStats();
     }
 
     private void updateButtonsState() {
@@ -104,13 +111,13 @@ public class DashboardController {
         btnFilterType.setStyle(selectedCategories.isEmpty() ? "" : "-fx-base: #e3f2fd; -fx-text-fill: #0d47a1;");
     }
 
-    private void updateUi(List<Expense> expenses) {
-        expenseTable.setItems(FXCollections.observableArrayList(expenses));
+    private void updateUiStats() {
+        // Calcoliamo le statistiche sui dati FILTRATI
+        int total = filteredData.size();
+        long completed = filteredData.stream().filter(e -> e.getExpenseState() == ExpenseState.COMPLETED).count();
+        long partial = total - completed;
 
-        long completed = expenses.stream().filter(e -> e.getExpenseState() == ExpenseState.COMPLETED).count();
-        long partial = expenses.size() - completed;
-
-        lblTotal.setText("Visualizzate: " + expenses.size());
+        lblTotal.setText("Visualizzate: " + total);
         lblCompliant.setText("Completate: " + completed);
         lblPartial.setText("Da completare: " + partial);
 
@@ -179,6 +186,13 @@ public class DashboardController {
             }
         });
 
+        // Setup FilteredList e SortedList
+        filteredData = new FilteredList<>(masterData, p -> true);
+        SortedList<Expense> sortedData = new SortedList<>(filteredData);
+        sortedData.comparatorProperty().bind(expenseTable.comparatorProperty());
+
+        expenseTable.setItems(sortedData);
+
         expenseTable.setRowFactory(tv -> {
             TableRow<Expense> row = new TableRow<>();
             row.setOnMouseClicked(event -> {
@@ -195,58 +209,53 @@ public class DashboardController {
         if (isUpdating) return;
 
         String selectedYear = yearCombo.getValue();
-
-        // Disabilita UI durante caricamento
         yearCombo.setDisable(true);
+        expenseTable.setPlaceholder(new ProgressIndicator());
 
-        Task<Void> loadTask = new Task<>() {
+        Task<LoadResult> loadTask = new Task<>() {
             @Override
-            protected Void call() throws Exception {
+            protected LoadResult call() throws Exception {
                 if (!ServiceManager.getInstance().isReady()) ServiceManager.getInstance().init();
 
+                // 1. Recupera Anni
                 List<String> availableYears = ServiceManager.getInstance().getMetadata().getAvailableYears();
-
                 if (availableYears.isEmpty()) {
                     availableYears.add(String.valueOf(LocalDate.now().getYear()));
                 }
 
-                final List<String> finalYears = availableYears;
+                String yearToLoad = (selectedYear != null && availableYears.contains(selectedYear))
+                        ? selectedYear : availableYears.get(0);
 
-                // Aggiorna ComboAnni in thread UI ma senza bloccare
-                Platform.runLater(() -> {
-                    isUpdating = true;
-                    try {
-                        String current = yearCombo.getValue();
-                        yearCombo.setItems(FXCollections.observableArrayList(finalYears));
-                        if (current == null || !finalYears.contains(current)) {
-                            yearCombo.getSelectionModel().selectFirst();
-                        } else {
-                            yearCombo.setValue(current);
-                        }
-                    } finally {
-                        isUpdating = false;
-                    }
-                });
+                // 2. Carica Dati Pesanti (IO)
+                List<Expense> expenses = ServiceManager.getInstance().getMetadata().findByYear(yearToLoad);
+                List<Person> persons = ServiceManager.getInstance().getService().getAllPersons();
 
-                // Attesa tecnica per assicurarsi che yearCombo sia aggiornato (safe)
-                Thread.sleep(100);
-
-                String yearToLoad = (selectedYear != null && finalYears.contains(selectedYear))
-                        ? selectedYear : finalYears.get(0);
-
-                // Caricamento pesante DB
-                allExpenses = ServiceManager.getInstance().getMetadata().findByYear(yearToLoad);
-                allPersons = ServiceManager.getInstance().getService().getAllPersons();
-                return null;
+                return new LoadResult(availableYears, yearToLoad, expenses, persons);
             }
         };
 
-        loadTask.setOnRunning(e -> expenseTable.setPlaceholder(new ProgressIndicator()));
-
         loadTask.setOnSucceeded(e -> {
-            yearCombo.setDisable(false);
-            expenseTable.setPlaceholder(new Label("Nessuna spesa da visualizzare."));
-            applyFilters();
+            LoadResult result = loadTask.getValue();
+
+            // 3. Aggiornamento UI (Tutto insieme, niente sleep)
+            isUpdating = true;
+            try {
+                yearCombo.setItems(FXCollections.observableArrayList(result.years));
+                yearCombo.setValue(result.loadedYear);
+
+                allPersons = result.persons;
+
+                // Aggiorna Master Data -> Triggera FilteredList -> Triggera UI
+                masterData.setAll(result.expenses);
+
+                // Riapplica filtri e statistiche
+                applyFilters();
+
+            } finally {
+                isUpdating = false;
+                yearCombo.setDisable(false);
+                expenseTable.setPlaceholder(new Label("Nessuna spesa da visualizzare."));
+            }
         });
 
         loadTask.setOnFailed(e -> {
@@ -258,6 +267,9 @@ public class DashboardController {
 
         new Thread(loadTask).start();
     }
+
+    // Record di supporto per passare dati dal background thread
+    private record LoadResult(List<String> years, String loadedYear, List<Expense> expenses, List<Person> persons) {}
 
     @FXML
     public void handleEdit() {

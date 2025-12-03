@@ -11,13 +11,13 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Comparator;
+import java.util.concurrent.TimeUnit;
 
 public class HelloApplication extends Application {
     @Override
     public void start(Stage stage) throws IOException {
-        // 1. Pulizia Cache all'avvio
-        cleanCache();
+        // 1. Pulizia Cache Intelligente (non blocca l'avvio)
+        new Thread(this::cleanOldCache).start();
 
         // 2. Setup UI
         Application.setUserAgentStylesheet(new PrimerLight().getUserAgentStylesheet());
@@ -30,20 +30,30 @@ public class HelloApplication extends Application {
         stage.show();
     }
 
-    private void cleanCache() {
+    /**
+     * Pulisce solo i file di cache più vecchi di 7 giorni.
+     * Evita di riscaricare tutto ogni volta.
+     */
+    private void cleanOldCache() {
         try {
             Path cache = ServiceManager.getInstance().getCachePath();
             if (Files.exists(cache)) {
-                // Cancella ricorsivamente
+                long cutoff = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(7);
+
                 Files.walk(cache)
-                        .sorted(Comparator.reverseOrder())
+                        .filter(Files::isRegularFile)
+                        .filter(p -> p.toFile().lastModified() < cutoff)
                         .map(Path::toFile)
-                        .forEach(File::delete);
-                System.out.println("Cache pulita correttamente.");
+                        .forEach(file -> {
+                            try {
+                                if (file.delete()) {
+                                    System.out.println("Cache scaduta rimossa: " + file.getName());
+                                }
+                            } catch (Exception ignored) {}
+                        });
             }
         } catch (Exception e) {
-            // Ignoriamo errori di pulizia (es. file aperti)
-            System.err.println("Warning: Pulizia cache parziale o fallita.");
+            System.err.println("Warning: Manutenzione cache fallita: " + e.getMessage());
         }
     }
 
