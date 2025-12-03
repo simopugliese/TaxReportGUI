@@ -25,7 +25,9 @@ import java.io.IOException;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 public class AddExpenseController {
@@ -98,7 +100,6 @@ public class AddExpenseController {
                         pi.setPrefSize(16, 16);
                         box.getChildren().add(pi);
                     } else {
-                        // [FIX] Icona documento generica invece dell'occhio
                         FontIcon icon = new FontIcon("fas-file-alt");
                         icon.setStyle("-fx-fill: #666666;"); // Grigio scuro
                         box.getChildren().add(icon);
@@ -134,12 +135,12 @@ public class AddExpenseController {
             return;
         }
 
-        // [CRITICAL FIX] Se sta già scaricando, esci subito.
+        // Se sta già scaricando, esci subito.
         if (item.isDownloading()) return;
 
-        // [CRITICAL FIX] Imposta il flag SUBITO (sincrono) per bloccare chiamate successive
+        // Imposta il flag SUBITO per bloccare chiamate successive
         item.setDownloading(true);
-        filesListView.refresh(); // Aggiorna UI per mostrare lo spinner
+        filesListView.refresh();
 
         Task<File> downloadTask = new Task<>() {
             @Override protected File call() throws Exception {
@@ -170,7 +171,6 @@ public class AddExpenseController {
         try {
             if (Desktop.isDesktopSupported()) Desktop.getDesktop().open(file);
         } catch (IOException e) {
-            // Ignoriamo o logghiamo errore apertura viewer (non crasha l'app)
             System.err.println("Impossibile aprire file: " + e.getMessage());
         }
     }
@@ -180,15 +180,18 @@ public class AddExpenseController {
             @Override
             protected List<String> call() throws Exception {
                 if (!ServiceManager.getInstance().isReady()) ServiceManager.getInstance().init();
-                List<String> years = new ArrayList<>(ServiceManager.getInstance().getMetadata().getAvailableYears());
 
-                String current = String.valueOf(LocalDate.now().getYear());
-                String next = String.valueOf(LocalDate.now().getYear() + 1);
+                // 1. Recupera anni esistenti dal DB
+                Set<String> yearSet = new HashSet<>(ServiceManager.getInstance().getMetadata().getAvailableYears());
 
-                if (!years.contains(current)) years.add(0, current);
-                if (!years.contains(next)) years.add(0, next);
+                // 2. [MODIFICATO] Aggiunge range storico (-3 a +3)
+                int currentYear = LocalDate.now().getYear();
+                for (int i = -3; i <= 3; i++) {
+                    yearSet.add(String.valueOf(currentYear + i));
+                }
 
-                return years.stream().distinct()
+                // 3. Ordina decrescente (dal più recente)
+                return yearSet.stream()
                         .sorted((a, b) -> b.compareTo(a))
                         .collect(Collectors.toList());
             }
@@ -196,12 +199,16 @@ public class AddExpenseController {
 
         task.setOnSucceeded(e -> {
             comboYear.setItems(FXCollections.observableArrayList(task.getValue()));
-            if(comboYear.getValue() == null) comboYear.getSelectionModel().selectFirst();
+            // Seleziona l'anno corrente di default se non stiamo modificando una spesa
+            if (editingExpense == null) {
+                comboYear.setValue(String.valueOf(LocalDate.now().getYear()));
+            }
         });
 
         task.setOnFailed(e -> {
+            // Fallback minimale
             String current = String.valueOf(LocalDate.now().getYear());
-            comboYear.setItems(FXCollections.observableArrayList(current, String.valueOf(Integer.parseInt(current)+1)));
+            comboYear.setItems(FXCollections.observableArrayList(current));
             comboYear.setValue(current);
         });
 
