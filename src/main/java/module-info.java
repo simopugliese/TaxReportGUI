@@ -8,6 +8,7 @@ module com.simonepugliese.taxreportgui {
 
     // Importante: il modulo backend
     requires TaxReport;
+    requires java.desktop;
 
     // Export per lanciare l'app
     exports com.simonepugliese.taxreportgui;

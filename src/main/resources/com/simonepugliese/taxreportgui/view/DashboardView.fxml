@@ -18,40 +18,55 @@
     <children>
         <HBox alignment="CENTER_LEFT" spacing="15.0">
             <children>
-                <Label styleClass="title-2" text="Panoramica Spese" />
+                <Label styleClass="title-2" text="Panoramica" />
+
                 <ComboBox fx:id="yearCombo" onAction="#loadData" prefWidth="100.0" />
 
-                <Button mnemonicParsing="false" onAction="#handleEdit" text="Modifica Selezionata">
-                    <graphic>
-                        <FontIcon iconLiteral="fas-edit" />
-                    </graphic>
+                <Label text="|" textFill="#cccccc" />
+
+                <Button fx:id="btnFilterAll" onAction="#filterAll" text="Tutti">
+                    <graphic><FontIcon iconLiteral="fas-list" /></graphic>
                 </Button>
 
-                <Button mnemonicParsing="false" onAction="#handleRefresh" styleClass="accent" text="Aggiorna &amp; Valida">
-                    <graphic>
-                        <FontIcon iconLiteral="fas-sync" />
-                    </graphic>
+                <Button fx:id="btnFilterPerson" onAction="#filterPerson" text="Persone">
+                    <graphic><FontIcon iconLiteral="fas-user" /></graphic>
+                </Button>
+
+                <Button fx:id="btnFilterType" onAction="#filterCategory" text="Categorie">
+                    <graphic><FontIcon iconLiteral="fas-tags" /></graphic>
+                </Button>
+
+                <HBox HBox.hgrow="ALWAYS" />
+
+                <Button mnemonicParsing="false" onAction="#handleEdit" text="Modifica">
+                    <graphic><FontIcon iconLiteral="fas-edit" /></graphic>
+                </Button>
+
+                <Button mnemonicParsing="false" onAction="#handleRefresh" styleClass="accent" text="Check">
+                    <graphic><FontIcon iconLiteral="fas-sync" /></graphic>
                 </Button>
             </children>
         </HBox>
-        <HBox prefHeight="250.0" spacing="20.0">
+
+        <HBox prefHeight="200.0" spacing="20.0">
             <children>
-                <PieChart fx:id="statusChart" title="Stato Conformità" HBox.hgrow="ALWAYS" />
-                <VBox alignment="CENTER_LEFT" spacing="10.0" HBox.hgrow="SOMETIMES">
+                <PieChart fx:id="statusChart" title="Stato Conformità" HBox.hgrow="ALWAYS" labelsVisible="true"/>
+                <VBox alignment="CENTER_LEFT" spacing="10.0" minWidth="200.0">
                     <children>
-                        <Label styleClass="title-4" text="Riepilogo" />
-                        <Label fx:id="lblTotal" text="Totale Spese: 0" />
+                        <Label styleClass="title-4" text="Riepilogo (Filtrato)" />
+                        <Label fx:id="lblTotal" text="Visualizzate: 0" style="-fx-font-weight: bold;"/>
                         <Label fx:id="lblCompliant" text="Completate: 0" textFill="GREEN" />
                         <Label fx:id="lblPartial" text="Parziali: 0" textFill="ORANGE" />
                     </children>
                 </VBox>
             </children>
         </HBox>
+
         <TableView fx:id="expenseTable" VBox.vgrow="ALWAYS">
             <columns>
                 <TableColumn fx:id="colDate" prefWidth="100.0" text="Data" />
                 <TableColumn fx:id="colType" prefWidth="150.0" text="Tipo" />
-                <TableColumn fx:id="colDesc" prefWidth="250.0" text="Descrizione" />
+                <TableColumn fx:id="colDesc" prefWidth="300.0" text="Descrizione" />
                 <TableColumn fx:id="colPerson" prefWidth="150.0" text="Persona" />
                 <TableColumn fx:id="colState" prefWidth="120.0" text="Stato" />
             </columns>

@@ -14,6 +14,7 @@ import javafx.util.StringConverter;
 import org.kordamp.ikonli.javafx.FontIcon;
 import pugliesesimone.taxreport.model.*;
 
+import java.awt.Desktop;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -35,25 +36,31 @@ public class AddExpenseController {
 
     private Expense editingExpense;
 
+    // Wrapper per gestire file Locali (Nuovi) e Remoti (Esistenti)
     private static class AttachmentItem {
-        File file;
+        File localFile;
+        Document serverDoc; // [NEW] Salviamo l'intero oggetto Document
         DocumentType type;
-        String existingName;
+        String name;
 
+        // Costruttore per File Locali (Nuovi)
         public AttachmentItem(File f, DocumentType t) {
-            this.file = f;
+            this.localFile = f;
             this.type = t;
+            this.name = f.getName();
         }
 
-        public AttachmentItem(String name, DocumentType t) {
-            this.existingName = name;
-            this.type = t;
-            this.file = null;
+        // Costruttore per File Server (Esistenti)
+        public AttachmentItem(Document d) {
+            this.serverDoc = d;
+            this.type = d.getDocumentType();
+            // Estraiamo il nome dal path relativo
+            this.name = new File(d.getRelativePath()).getName();
         }
 
         @Override
         public String toString() {
-            return (file != null ? file.getName() : existingName + " (Server)") + " [" + type + "]";
+            return name + " [" + type + "]";
         }
     }
 
@@ -64,42 +71,71 @@ public class AddExpenseController {
         comboType.setItems(FXCollections.observableArrayList(ExpenseType.values()));
         comboType.getSelectionModel().selectFirst();
 
-        // Setup Combo Persone
         comboPerson.setConverter(new StringConverter<>() {
-            @Override
-            public String toString(Person p) { return p == null ? "" : p.getName(); }
-            @Override
-            public Person fromString(String string) { return null; }
+            @Override public String toString(Person p) { return p == null ? "" : p.getName(); }
+            @Override public Person fromString(String string) { return null; }
         });
 
         loadPersons();
 
+        // Setup Lista Allegati Custom
         filesListView.setCellFactory(param -> new ListCell<>() {
             @Override
             protected void updateItem(AttachmentItem item, boolean empty) {
                 super.updateItem(item, empty);
                 if (empty || item == null) {
                     setGraphic(null);
+                    setTooltip(null);
                 } else {
                     HBox box = new HBox(10);
-                    String labelText = item.file != null ? item.file.getName() : item.existingName + " (Cloud)";
-                    Label lblName = new Label(labelText);
+                    String prefix = (item.localFile != null) ? "🆕 " : "☁️ ";
+                    Label lblName = new Label(prefix + item.name);
                     Label lblType = new Label("[" + item.type + "]");
 
-                    if (item.file == null) {
-                        lblName.setStyle("-fx-text-fill: blue;");
-                    }
+                    if (item.localFile == null) lblName.setStyle("-fx-text-fill: blue;");
 
                     Button btnDel = new Button("", new FontIcon("fas-trash"));
                     btnDel.getStyleClass().add("danger");
                     btnDel.setOnAction(e -> getListView().getItems().remove(item));
 
+                    // [NEW] Pulsante o Icona View
+                    Button btnView = new Button("", new FontIcon("fas-eye"));
+                    btnView.setOnAction(e -> openAttachment(item));
+
                     HBox.setHgrow(lblName, Priority.ALWAYS);
-                    box.getChildren().addAll(lblName, lblType, btnDel);
+                    box.getChildren().addAll(lblName, lblType, btnView, btnDel);
                     setGraphic(box);
+
+                    // Doppio Click per aprire
+                    setOnMouseClicked(e -> {
+                        if (e.getClickCount() == 2 && !isEmpty()) {
+                            openAttachment(getItem());
+                        }
+                    });
                 }
             }
         });
+    }
+
+    // [NEW] Logica Apertura File
+    private void openAttachment(AttachmentItem item) {
+        try {
+            File fileToOpen;
+            if (item.localFile != null) {
+                fileToOpen = item.localFile;
+            } else {
+                // Scarica dal server (Smart Cache)
+                fileToOpen = ServiceManager.getInstance().downloadDocument(item.serverDoc);
+            }
+
+            // Apre col visualizzatore di sistema
+            if (Desktop.isDesktopSupported()) {
+                Desktop.getDesktop().open(fileToOpen);
+            }
+        } catch (Exception e) {
+            new Alert(Alert.AlertType.ERROR, "Errore apertura file: " + e.getMessage()).show();
+            e.printStackTrace();
+        }
     }
 
     private void loadPersons() {
@@ -107,31 +143,23 @@ public class AddExpenseController {
             if (!ServiceManager.getInstance().isReady()) ServiceManager.getInstance().init();
             List<Person> persons = ServiceManager.getInstance().getService().getAllPersons();
             comboPerson.setItems(FXCollections.observableArrayList(persons));
-        } catch (Exception e) {
-            // Ignoriamo errori di connessione qui
-        }
+        } catch (Exception e) {}
     }
 
     @FXML
     public void handlePersonSelection() {
         Person p = comboPerson.getValue();
-        if (p != null) {
-            txtFiscalCode.setText(p.getFiscalCode());
-        }
+        if (p != null) txtFiscalCode.setText(p.getFiscalCode());
     }
 
     public void setEditingExpense(Expense expense) {
         this.editingExpense = expense;
 
-        if (expense.getPerson() != null) {
-            comboPerson.getItems().stream()
-                    .filter(p -> p.getId().equals(expense.getPerson().getId()))
-                    .findFirst()
-                    .ifPresent(p -> {
-                        comboPerson.setValue(p);
-                        txtFiscalCode.setText(p.getFiscalCode());
-                    });
-        }
+        comboPerson.getItems().stream()
+                .filter(p -> p.getId().equals(expense.getPerson().getId()))
+                .findFirst().ifPresent(comboPerson::setValue);
+
+        if(comboPerson.getValue() != null) txtFiscalCode.setText(comboPerson.getValue().getFiscalCode());
 
         txtDescription.setText(expense.getDescription());
         comboYear.setValue(expense.getYear());
@@ -140,14 +168,12 @@ public class AddExpenseController {
         if (expense.getRawDate() != null && !expense.getRawDate().isEmpty()) {
             try {
                 datePicker.setValue(LocalDate.parse(expense.getRawDate(), DateTimeFormatter.ofPattern("dd/MM/yyyy")));
-            } catch (Exception e) {
-                System.err.println("Formato data non valido: " + expense.getRawDate());
-            }
+            } catch (Exception e) {}
         }
 
+        // Popola la lista mantenendo il riferimento al Document originale
         for (Document doc : expense.getDocuments()) {
-            String name = new File(doc.getRelativePath()).getName();
-            filesListView.getItems().add(new AttachmentItem(name, doc.getDocumentType()));
+            filesListView.getItems().add(new AttachmentItem(doc));
         }
 
         btnSave.setText("AGGIORNA SPESA");
@@ -175,7 +201,6 @@ public class AddExpenseController {
     public void handleSave() {
         try {
             if (!ServiceManager.getInstance().isReady()) ServiceManager.getInstance().init();
-
             if (comboPerson.getValue() == null) {
                 new Alert(Alert.AlertType.WARNING, "Seleziona una persona!").show();
                 return;
@@ -183,23 +208,20 @@ public class AddExpenseController {
 
             Person person = comboPerson.getValue();
 
-            // Preparazione Allegati NUOVI
+            // 1. Nuovi Allegati (FileInputStream)
             List<Attachment> newAttachments = new ArrayList<>();
             for (AttachmentItem item : filesListView.getItems()) {
-                if (item.file != null) {
-                    newAttachments.add(new Attachment(item.type, item.file.getName(), new FileInputStream(item.file)));
+                if (item.localFile != null) {
+                    newAttachments.add(new Attachment(item.type, item.name, new FileInputStream(item.localFile)));
                 }
             }
 
-            // Calcolo documenti SOPRAVVISSUTI
+            // 2. Allegati Sopravvissuti (Server)
             List<Document> survivingDocs = new ArrayList<>();
             if (editingExpense != null) {
                 for (AttachmentItem item : filesListView.getItems()) {
-                    if (item.file == null) {
-                        editingExpense.getDocuments().stream()
-                                .filter(d -> d.getDocumentType() == item.type && d.getRelativePath().endsWith(item.existingName))
-                                .findFirst()
-                                .ifPresent(survivingDocs::add);
+                    if (item.serverDoc != null) {
+                        survivingDocs.add(item.serverDoc);
                     }
                 }
             }
@@ -229,18 +251,14 @@ public class AddExpenseController {
 
             new Alert(Alert.AlertType.INFORMATION, "Spesa salvata con successo!").showAndWait();
 
-            // --- FIX NAVIGAZIONE: Torna alla Dashboard ---
+            // Torna alla Dashboard
             try {
                 FXMLLoader loader = new FXMLLoader(getClass().getResource("/com/simonepugliese/taxreportgui/view/DashboardView.fxml"));
                 Parent view = loader.load();
-
-                // Risaliamo al BorderPane principale e settiamo la Dashboard al centro
                 if (btnSave.getScene().getRoot() instanceof BorderPane mainPane) {
                     mainPane.setCenter(view);
                 }
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
+            } catch (IOException e) { e.printStackTrace(); }
 
         } catch (Exception e) {
             new Alert(Alert.AlertType.ERROR, "Errore: " + e.getMessage()).show();

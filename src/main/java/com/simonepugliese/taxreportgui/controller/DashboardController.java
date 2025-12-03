@@ -10,11 +10,17 @@ import javafx.scene.Parent;
 import javafx.scene.chart.PieChart;
 import javafx.scene.control.*;
 import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.VBox;
 import pugliesesimone.taxreport.model.Expense;
 import pugliesesimone.taxreport.model.ExpenseState;
+import pugliesesimone.taxreport.model.ExpenseType;
+import pugliesesimone.taxreport.model.Person;
 
 import java.io.IOException;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 public class DashboardController {
 
@@ -23,6 +29,15 @@ public class DashboardController {
     @FXML private Label lblTotal, lblCompliant, lblPartial;
     @FXML private TableView<Expense> expenseTable;
     @FXML private TableColumn<Expense, String> colDate, colType, colDesc, colPerson, colState;
+    @FXML private Button btnFilterPerson, btnFilterType;
+
+    // Dati in memoria
+    private List<Expense> allExpenses = List.of();
+    private List<Person> allPersons = List.of();
+
+    // Filtri Attivi (Set vuoto = "Tutti")
+    private Set<String> selectedPersonIds = new HashSet<>();
+    private Set<ExpenseType> selectedCategories = new HashSet<>();
 
     @FXML
     public void initialize() {
@@ -33,6 +48,117 @@ public class DashboardController {
         loadData();
     }
 
+    // --- FILTRI ---
+
+    @FXML
+    public void filterAll() {
+        selectedPersonIds.clear();
+        selectedCategories.clear();
+        applyFilters();
+    }
+
+    @FXML
+    public void filterPerson() {
+        showMultiSelectDialog("Filtra Persone", allPersons,
+                p -> p.getId().toString(),
+                Person::getName,
+                selectedPersonIds,
+                newSelection -> {
+                    selectedPersonIds = newSelection;
+                    applyFilters();
+                });
+    }
+
+    @FXML
+    public void filterCategory() {
+        showMultiSelectDialog("Filtra Categorie", List.of(ExpenseType.values()),
+                Enum::name,
+                Enum::name, // Magari usa un formatter per renderlo più leggibile
+                selectedCategories.stream().map(Enum::name).collect(Collectors.toSet()),
+                newSelection -> {
+                    selectedCategories = newSelection.stream()
+                            .map(ExpenseType::valueOf)
+                            .collect(Collectors.toSet());
+                    applyFilters();
+                });
+    }
+
+    private void applyFilters() {
+        List<Expense> filtered = allExpenses.stream()
+                .filter(e -> selectedPersonIds.isEmpty() || selectedPersonIds.contains(e.getPerson().getId().toString()))
+                .filter(e -> selectedCategories.isEmpty() || selectedCategories.contains(e.getExpenseType()))
+                .collect(Collectors.toList());
+
+        updateUi(filtered);
+        updateButtonsState();
+    }
+
+    private void updateButtonsState() {
+        btnFilterPerson.setText(selectedPersonIds.isEmpty() ? "Persone" : "Persone (" + selectedPersonIds.size() + ")");
+        btnFilterType.setText(selectedCategories.isEmpty() ? "Categorie" : "Categorie (" + selectedCategories.size() + ")");
+
+        btnFilterPerson.setStyle(selectedPersonIds.isEmpty() ? "" : "-fx-base: #e3f2fd; -fx-text-fill: #0d47a1;");
+        btnFilterType.setStyle(selectedCategories.isEmpty() ? "" : "-fx-base: #e3f2fd; -fx-text-fill: #0d47a1;");
+    }
+
+    private void updateUi(List<Expense> expenses) {
+        expenseTable.setItems(FXCollections.observableArrayList(expenses));
+
+        long completed = expenses.stream().filter(e -> e.getExpenseState() == ExpenseState.COMPLETED).count();
+        long partial = expenses.size() - completed;
+
+        lblTotal.setText("Visualizzate: " + expenses.size());
+        lblCompliant.setText("Completate: " + completed);
+        lblPartial.setText("Da completare: " + partial);
+
+        ObservableList<PieChart.Data> pieData = FXCollections.observableArrayList(
+                new PieChart.Data("Completate", completed),
+                new PieChart.Data("Incomplete", partial)
+        );
+        statusChart.setData(pieData);
+    }
+
+    // --- DIALOGO GENERICO MULTI-SELECT ---
+    private <T> void showMultiSelectDialog(String title, List<T> items,
+                                           java.util.function.Function<T, String> idMapper,
+                                           java.util.function.Function<T, String> labelMapper,
+                                           Set<String> currentSelection,
+                                           java.util.function.Consumer<Set<String>> onConfirm) {
+
+        Dialog<Set<String>> dialog = new Dialog<>();
+        dialog.setTitle(title);
+        dialog.setHeaderText("Seleziona gli elementi da visualizzare:");
+
+        ButtonType loginButtonType = new ButtonType("Applica", ButtonBar.ButtonData.OK_DONE);
+        dialog.getDialogPane().getButtonTypes().addAll(loginButtonType, ButtonType.CANCEL);
+
+        VBox content = new VBox(10);
+        Set<String> tempSelection = new HashSet<>(currentSelection);
+
+        for (T item : items) {
+            String id = idMapper.apply(item);
+            CheckBox cb = new CheckBox(labelMapper.apply(item));
+            cb.setSelected(tempSelection.contains(id));
+            cb.selectedProperty().addListener((obs, old, isSelected) -> {
+                if (isSelected) tempSelection.add(id); else tempSelection.remove(id);
+            });
+            content.getChildren().add(cb);
+        }
+
+        ScrollPane scroll = new ScrollPane(content);
+        scroll.setFitToWidth(true);
+        scroll.setPrefHeight(300);
+        dialog.getDialogPane().setContent(scroll);
+
+        dialog.setResultConverter(dialogButton -> {
+            if (dialogButton == loginButtonType) return tempSelection;
+            return null;
+        });
+
+        dialog.showAndWait().ifPresent(onConfirm);
+    }
+
+    // --- SETUP & LOAD ---
     private void setupTable() {
         colDate.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getRawDate()));
         colType.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getExpenseType().name()));
@@ -47,57 +173,52 @@ public class DashboardController {
                 setText(item);
                 if (item == null || empty) {
                     setStyle("");
-                } else if ("COMPLETED".equals(item)) {
-                    setStyle("-fx-text-fill: green; -fx-font-weight: bold;");
-                } else if ("PARTIAL".equals(item) || "INITIAL".equals(item)) {
-                    setStyle("-fx-text-fill: orange; -fx-font-weight: bold;");
-                } else {
-                    setStyle("-fx-text-fill: red;");
-                }
+                } else if ("COMPLETED".equals(item)) setStyle("-fx-text-fill: green; -fx-font-weight: bold;");
+                else setStyle("-fx-text-fill: orange; -fx-font-weight: bold;");
             }
         });
-    }
 
-    @FXML
-    public void handleEdit() {
-        Expense selected = expenseTable.getSelectionModel().getSelectedItem();
-        if (selected == null) {
-            new Alert(Alert.AlertType.WARNING, "Seleziona una spesa dalla tabella!").show();
-            return;
-        }
-
-        try {
-            FXMLLoader loader = new FXMLLoader(getClass().getResource("/com/simonepugliese/taxreportgui/view/AddExpenseView.fxml"));
-            Parent view = loader.load();
-
-            // Passiamo la spesa al controller
-            AddExpenseController controller = loader.getController();
-            controller.setEditingExpense(selected);
-
-            // Hack veloce: risaliamo al BorderPane principale per cambiare vista
-            // In un'app più grande useresti un EventBus o un NavigationService
-            BorderPane mainPane = (BorderPane) expenseTable.getScene().getRoot();
-            mainPane.setCenter(view);
-
-        } catch (IOException e) {
-            e.printStackTrace();
-            new Alert(Alert.AlertType.ERROR, "Errore apertura vista modifica: " + e.getMessage()).show();
-        }
+        // Doppio Click per Modificare
+        expenseTable.setRowFactory(tv -> {
+            TableRow<Expense> row = new TableRow<>();
+            row.setOnMouseClicked(event -> {
+                if (event.getClickCount() == 2 && (!row.isEmpty()) ) {
+                    handleEdit();
+                }
+            });
+            return row ;
+        });
     }
 
     @FXML
     public void loadData() {
         try {
-            if (!ServiceManager.getInstance().isReady()) {
-                ServiceManager.getInstance().init();
-            }
+            if (!ServiceManager.getInstance().isReady()) ServiceManager.getInstance().init();
             String year = yearCombo.getValue();
-            List<Expense> expenses = ServiceManager.getInstance().getMetadata().findByYear(year);
-            updateCharts(expenses);
-            expenseTable.setItems(FXCollections.observableArrayList(expenses));
+            this.allExpenses = ServiceManager.getInstance().getMetadata().findByYear(year);
+            this.allPersons = ServiceManager.getInstance().getService().getAllPersons();
+
+            // Applica i filtri (che inizialmente sono vuoti, quindi mostra tutto)
+            applyFilters();
+
         } catch (Exception e) {
-            System.err.println("Impossibile caricare dati dashboard: " + e.getMessage());
+            e.printStackTrace();
         }
+    }
+
+    @FXML
+    public void handleEdit() {
+        Expense selected = expenseTable.getSelectionModel().getSelectedItem();
+        if (selected == null) return;
+
+        try {
+            FXMLLoader loader = new FXMLLoader(getClass().getResource("/com/simonepugliese/taxreportgui/view/AddExpenseView.fxml"));
+            Parent view = loader.load();
+            AddExpenseController controller = loader.getController();
+            controller.setEditingExpense(selected);
+            BorderPane mainPane = (BorderPane) expenseTable.getScene().getRoot();
+            mainPane.setCenter(view);
+        } catch (IOException e) { e.printStackTrace(); }
     }
 
     @FXML
@@ -110,19 +231,5 @@ public class DashboardController {
         } catch (Exception e) {
             new Alert(Alert.AlertType.ERROR, "Errore verifica: " + e.getMessage()).show();
         }
-    }
-
-    private void updateCharts(List<Expense> expenses) {
-        long completed = expenses.stream().filter(e -> e.getExpenseState() == ExpenseState.COMPLETED).count();
-        long partial = expenses.stream().filter(e -> e.getExpenseState() != ExpenseState.COMPLETED).count();
-
-        ObservableList<PieChart.Data> pieData = FXCollections.observableArrayList(
-                new PieChart.Data("Completate", completed),
-                new PieChart.Data("Incomplete", partial)
-        );
-        statusChart.setData(pieData);
-        lblTotal.setText("Totale Spese: " + expenses.size());
-        lblCompliant.setText("Completate: " + completed);
-        lblPartial.setText("Da completare: " + partial);
     }
 }
