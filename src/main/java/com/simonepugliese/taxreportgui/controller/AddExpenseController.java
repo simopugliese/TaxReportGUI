@@ -1,7 +1,9 @@
 package com.simonepugliese.taxreportgui.controller;
 
 import com.simonepugliese.taxreportgui.util.ServiceManager;
+import javafx.application.Platform;
 import javafx.collections.FXCollections;
+import javafx.concurrent.Task;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
@@ -9,10 +11,12 @@ import javafx.scene.control.*;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
+import javafx.scene.control.ProgressIndicator;
 import javafx.stage.FileChooser;
 import javafx.util.StringConverter;
 import org.kordamp.ikonli.javafx.FontIcon;
 import pugliesesimone.taxreport.model.*;
+import javafx.geometry.Pos; // Importato per allineare l'HBox
 
 import java.awt.Desktop;
 import java.io.File;
@@ -36,31 +40,38 @@ public class AddExpenseController {
 
     private Expense editingExpense;
 
-    // Wrapper per gestire file Locali (Nuovi) e Remoti (Esistenti)
     private static class AttachmentItem {
         File localFile;
-        Document serverDoc; // [NEW] Salviamo l'intero oggetto Document
+        Document serverDoc;
         DocumentType type;
         String name;
 
-        // Costruttore per File Locali (Nuovi)
+        // [NEW] Stato di downloading (per il feedback visivo)
+        private boolean downloading = false;
+
         public AttachmentItem(File f, DocumentType t) {
             this.localFile = f;
             this.type = t;
             this.name = f.getName();
         }
 
-        // Costruttore per File Server (Esistenti)
         public AttachmentItem(Document d) {
             this.serverDoc = d;
             this.type = d.getDocumentType();
-            // Estraiamo il nome dal path relativo
             this.name = new File(d.getRelativePath()).getName();
         }
 
         @Override
         public String toString() {
             return name + " [" + type + "]";
+        }
+
+        public boolean isDownloading() {
+            return downloading;
+        }
+
+        public void setDownloading(boolean downloading) {
+            this.downloading = downloading;
         }
     }
 
@@ -86,8 +97,20 @@ public class AddExpenseController {
                 if (empty || item == null) {
                     setGraphic(null);
                     setTooltip(null);
+                    setOnMouseClicked(null);
                 } else {
                     HBox box = new HBox(10);
+
+                    // [NEW] Indicatore di stato
+                    if (item.isDownloading()) {
+                        ProgressIndicator pi = new ProgressIndicator(ProgressIndicator.INDETERMINATE_PROGRESS);
+                        pi.setPrefSize(20, 20); // Dimensione più gestibile
+                        box.getChildren().add(pi);
+                    } else {
+                        // Icona "occhi" per indicare visualizzazione
+                        box.getChildren().add(new FontIcon("fas-eye"));
+                    }
+
                     String prefix = (item.localFile != null) ? "🆕 " : "☁️ ";
                     Label lblName = new Label(prefix + item.name);
                     Label lblType = new Label("[" + item.type + "]");
@@ -98,17 +121,20 @@ public class AddExpenseController {
                     btnDel.getStyleClass().add("danger");
                     btnDel.setOnAction(e -> getListView().getItems().remove(item));
 
-                    // [NEW] Pulsante o Icona View
                     Button btnView = new Button("", new FontIcon("fas-eye"));
+                    btnView.setDisable(item.isDownloading());
                     btnView.setOnAction(e -> openAttachment(item));
 
                     HBox.setHgrow(lblName, Priority.ALWAYS);
-                    box.getChildren().addAll(lblName, lblType, btnView, btnDel);
+                    // Rimuoviamo l'icona "eye" duplicata
+                    box.getChildren().addAll(lblName, lblType, btnDel);
+
+                    box.setAlignment(Pos.CENTER_LEFT);
                     setGraphic(box);
 
                     // Doppio Click per aprire
                     setOnMouseClicked(e -> {
-                        if (e.getClickCount() == 2 && !isEmpty()) {
+                        if (e.getClickCount() == 2 && (!isEmpty()) ) {
                             openAttachment(getItem());
                         }
                     });
@@ -117,26 +143,58 @@ public class AddExpenseController {
         });
     }
 
-    // [NEW] Logica Apertura File
     private void openAttachment(AttachmentItem item) {
-        try {
-            File fileToOpen;
-            if (item.localFile != null) {
-                fileToOpen = item.localFile;
-            } else {
-                // Scarica dal server (Smart Cache)
-                fileToOpen = ServiceManager.getInstance().downloadDocument(item.serverDoc);
-            }
+        if (item.localFile != null) {
+            openFileOnDesktop(item.localFile);
+            return;
+        }
 
-            // Apre col visualizzatore di sistema
-            if (Desktop.isDesktopSupported()) {
-                Desktop.getDesktop().open(fileToOpen);
+        if (item.isDownloading()) return;
+
+        // [CORE FIX] Task per il download in background
+        Task<File> downloadTask = new Task<>() {
+            @Override
+            protected File call() throws Exception {
+                return ServiceManager.getInstance().downloadDocument(item.serverDoc);
             }
-        } catch (Exception e) {
-            new Alert(Alert.AlertType.ERROR, "Errore apertura file: " + e.getMessage()).show();
+        };
+
+        // Gestione degli eventi del Task
+        downloadTask.setOnRunning(e -> {
+            item.setDownloading(true);
+            filesListView.refresh(); // Forza l'aggiornamento
+        });
+
+        downloadTask.setOnSucceeded(e -> {
+            item.setDownloading(false);
+            filesListView.refresh();
+
+            File downloadedFile = downloadTask.getValue();
+            openFileOnDesktop(downloadedFile);
+        });
+
+        downloadTask.setOnFailed(e -> {
+            item.setDownloading(false);
+            filesListView.refresh();
+            new Alert(Alert.AlertType.ERROR, "Errore download: " + downloadTask.getException().getMessage()).show();
+            downloadTask.getException().printStackTrace();
+        });
+
+        // Avvia il task su un thread separato
+        new Thread(downloadTask).start();
+    }
+
+    private void openFileOnDesktop(File file) {
+        try {
+            if (Desktop.isDesktopSupported()) {
+                Desktop.getDesktop().open(file);
+            }
+        } catch (IOException e) {
+            new Alert(Alert.AlertType.ERROR, "Errore apertura file: Impossibile avviare il visualizzatore di sistema.").show();
             e.printStackTrace();
         }
     }
+
 
     private void loadPersons() {
         try {
@@ -171,7 +229,6 @@ public class AddExpenseController {
             } catch (Exception e) {}
         }
 
-        // Popola la lista mantenendo il riferimento al Document originale
         for (Document doc : expense.getDocuments()) {
             filesListView.getItems().add(new AttachmentItem(doc));
         }
@@ -208,7 +265,6 @@ public class AddExpenseController {
 
             Person person = comboPerson.getValue();
 
-            // 1. Nuovi Allegati (FileInputStream)
             List<Attachment> newAttachments = new ArrayList<>();
             for (AttachmentItem item : filesListView.getItems()) {
                 if (item.localFile != null) {
@@ -216,7 +272,6 @@ public class AddExpenseController {
                 }
             }
 
-            // 2. Allegati Sopravvissuti (Server)
             List<Document> survivingDocs = new ArrayList<>();
             if (editingExpense != null) {
                 for (AttachmentItem item : filesListView.getItems()) {
@@ -251,7 +306,6 @@ public class AddExpenseController {
 
             new Alert(Alert.AlertType.INFORMATION, "Spesa salvata con successo!").showAndWait();
 
-            // Torna alla Dashboard
             try {
                 FXMLLoader loader = new FXMLLoader(getClass().getResource("/com/simonepugliese/taxreportgui/view/DashboardView.fxml"));
                 Parent view = loader.load();

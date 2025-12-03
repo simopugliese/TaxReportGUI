@@ -4,6 +4,7 @@ import com.simonepugliese.taxreportgui.util.ServiceManager;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
+import javafx.concurrent.Task;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
@@ -31,13 +32,13 @@ public class DashboardController {
     @FXML private TableColumn<Expense, String> colDate, colType, colDesc, colPerson, colState;
     @FXML private Button btnFilterPerson, btnFilterType;
 
-    // Dati in memoria
     private List<Expense> allExpenses = List.of();
     private List<Person> allPersons = List.of();
 
-    // Filtri Attivi (Set vuoto = "Tutti")
     private Set<String> selectedPersonIds = new HashSet<>();
     private Set<ExpenseType> selectedCategories = new HashSet<>();
+
+    // [NEW] Indicatore di loading globale (potrebbe essere in FXML, ma qui è gestito implicitamente)
 
     @FXML
     public void initialize() {
@@ -73,7 +74,7 @@ public class DashboardController {
     public void filterCategory() {
         showMultiSelectDialog("Filtra Categorie", List.of(ExpenseType.values()),
                 Enum::name,
-                Enum::name, // Magari usa un formatter per renderlo più leggibile
+                Enum::name,
                 selectedCategories.stream().map(Enum::name).collect(Collectors.toSet()),
                 newSelection -> {
                     selectedCategories = newSelection.stream()
@@ -118,7 +119,6 @@ public class DashboardController {
         statusChart.setData(pieData);
     }
 
-    // --- DIALOGO GENERICO MULTI-SELECT ---
     private <T> void showMultiSelectDialog(String title, List<T> items,
                                            java.util.function.Function<T, String> idMapper,
                                            java.util.function.Function<T, String> labelMapper,
@@ -158,7 +158,7 @@ public class DashboardController {
         dialog.showAndWait().ifPresent(onConfirm);
     }
 
-    // --- SETUP & LOAD ---
+    // --- SETUP & LOAD (con Task) ---
     private void setupTable() {
         colDate.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getRawDate()));
         colType.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getExpenseType().name()));
@@ -178,7 +178,6 @@ public class DashboardController {
             }
         });
 
-        // Doppio Click per Modificare
         expenseTable.setRowFactory(tv -> {
             TableRow<Expense> row = new TableRow<>();
             row.setOnMouseClicked(event -> {
@@ -192,18 +191,38 @@ public class DashboardController {
 
     @FXML
     public void loadData() {
-        try {
-            if (!ServiceManager.getInstance().isReady()) ServiceManager.getInstance().init();
-            String year = yearCombo.getValue();
-            this.allExpenses = ServiceManager.getInstance().getMetadata().findByYear(year);
-            this.allPersons = ServiceManager.getInstance().getService().getAllPersons();
+        String year = yearCombo.getValue();
 
-            // Applica i filtri (che inizialmente sono vuoti, quindi mostra tutto)
+        // [CORE FIX] Esegui il caricamento dati su un Task in background
+        Task<Void> loadTask = new Task<>() {
+            @Override
+            protected Void call() throws Exception {
+                if (!ServiceManager.getInstance().isReady()) ServiceManager.getInstance().init();
+                allExpenses = ServiceManager.getInstance().getMetadata().findByYear(year);
+                allPersons = ServiceManager.getInstance().getService().getAllPersons();
+                return null;
+            }
+        };
+
+        loadTask.setOnRunning(e -> {
+            // Qui puoi mostrare un ProgressIndicator nella UI se vuoi
+            expenseTable.setPlaceholder(new ProgressIndicator());
+        });
+
+        loadTask.setOnSucceeded(e -> {
+            expenseTable.setPlaceholder(new Label("Nessuna spesa da visualizzare."));
+            // Aggiorna la UI sul thread JavaFX
             applyFilters();
+        });
 
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        loadTask.setOnFailed(e -> {
+            expenseTable.setPlaceholder(new Label("Errore caricamento dati."));
+            new Alert(Alert.AlertType.ERROR, "Errore caricamento dati: " + loadTask.getException().getMessage()).show();
+            loadTask.getException().printStackTrace();
+        });
+
+        // Avvia il Task
+        new Thread(loadTask).start();
     }
 
     @FXML
